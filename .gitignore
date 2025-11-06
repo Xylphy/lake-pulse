@@ -1,0 +1,8 @@
+/target
+/debug
+/cluster-logs
+.env
+.idea
+.DS_Store
+*.sled
+*.db
