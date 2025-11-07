@@ -1,6 +1,6 @@
 use super::metrics::{DeltaMetrics, FileStatistics, PartitionMetrics, ProtocolInfo, TableMetadata};
 use crate::util::retry::retry_with_max_retries;
-use deltalake::kernel::StructType;
+use deltalake::kernel::{Metadata, StructType};
 use deltalake::{DeltaTable, open_table_with_storage_options};
 use std::collections::HashMap;
 use std::error::Error;
@@ -18,23 +18,7 @@ impl DeltaReader {
     /// # Arguments
     ///
     /// * `table_uri` - The URI of the Delta table (e.g., "s3://bucket/path", "abfss://container@account.dfs.core.windows.net/path")
-    /// * `storage_config` - Optional storage configuration for authentication
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use lake_health::delta::DeltaReader;
-    /// use lake_health::storage::StorageConfig;
-    ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    /// let config = StorageConfig::azure()
-    ///     .with_option("account_name", "myaccount")
-    ///     .with_option("container", "mycontainer");
-    ///
-    /// let reader = DeltaReader::open("abfss://container@account.dfs.core.windows.net/table", Some(config)).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// * `cleaned_storage_options` - Optional storage configuration options
     pub async fn open(
         location: &str,
         cleaned_storage_options: &HashMap<String, String>,
@@ -44,7 +28,6 @@ impl DeltaReader {
         deltalake_azure::register_handlers(None);
         deltalake_aws::register_handlers(None);
 
-        // Parse the URI
         let url = Url::parse(location)?;
 
         // Build the table with storage options if provided
@@ -116,9 +99,14 @@ impl DeltaReader {
     }
 
     /// Extract table metadata from Delta metadata
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - The Delta metadata
+    /// * `schema` - The Delta schema
     fn extract_table_metadata(
         &self,
-        metadata: &deltalake::kernel::Metadata,
+        metadata: &Metadata,
         schema: &StructType,
     ) -> Result<TableMetadata, Box<dyn Error + Send + Sync>> {
         // Count fields in schema
@@ -188,7 +176,7 @@ impl DeltaReader {
                     // This would require accessing the underlying Add action
                 }
                 Err(e) => {
-                    warn!("Error reading file metadata: {}", e);
+                    warn!("Error reading file metadata, error={}", e);
                 }
             }
         }
@@ -213,7 +201,7 @@ impl DeltaReader {
         };
 
         info!(
-            "File statistics: {} files, {} bytes total, avg {} bytes",
+            "File statistics: file_count={}, total_bytesize={}, avg_bytesize={}",
             stats.num_files, stats.total_size_bytes, stats.avg_file_size_bytes
         );
 

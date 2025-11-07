@@ -1,13 +1,13 @@
-use crate::delta::metrics::DeltaMetrics;
+use crate::reader::delta::metrics::DeltaMetrics;
+use crate::reader::iceberg::metrics::IcebergMetrics;
+use crate::util::ascii_gantt::GanttConfig;
 use crate::util::ascii_gantt::to_ascii_gantt;
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{Error as JsonError, json};
 use std::collections::{HashMap, LinkedList};
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-
-// Re-export GanttConfig for convenience
-pub use crate::util::ascii_gantt::GanttConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
@@ -114,6 +114,7 @@ pub struct HealthMetrics {
     pub table_constraints: Option<TableConstraintsMetrics>,
     pub file_compaction: Option<FileCompactionMetrics>,
     pub delta_table_specific_metrics: Option<DeltaMetrics>,
+    pub iceberg_table_specific_metrics: Option<IcebergMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,7 +229,7 @@ impl Display for HealthReport {
         let report = self;
 
         writeln!(f, "\n{}", "=".repeat(60))?;
-        writeln!(f, "Table Health Report: {}", report.table_type)?;
+        writeln!(f, "Table Health Report: {}", report.table_path)?;
         writeln!(f, "Type: {}", report.table_type)?;
         writeln!(f, "Analysis Time: {}", report.analysis_timestamp)?;
         writeln!(f, "{}\n", "=".repeat(60))?;
@@ -775,26 +776,43 @@ impl Display for HealthReport {
                     .metadata
                     .partition_columns
             )?;
+            if let Some(created_time) = report
+                .metrics
+                .delta_table_specific_metrics
+                .as_ref()
+                .unwrap()
+                .metadata
+                .created_time
+            {
+                let created_datetime = DateTime::from_timestamp(created_time / 1000, 0).unwrap();
+                writeln!(
+                    f,
+                    "  Created Time:          {}",
+                    created_datetime.to_rfc3339()
+                )?;
+            }
+            let tbl_props = report
+                .metrics
+                .delta_table_specific_metrics
+                .as_ref()
+                .unwrap()
+                .table_properties
+                .clone();
             writeln!(
                 f,
-                "  Created Time:          {:?}",
-                report
-                    .metrics
-                    .delta_table_specific_metrics
-                    .as_ref()
-                    .unwrap()
-                    .metadata
-                    .created_time
-            )?;
-            writeln!(
-                f,
-                "  Table Properties:      {:?}",
-                report
-                    .metrics
-                    .delta_table_specific_metrics
-                    .as_ref()
-                    .unwrap()
-                    .table_properties
+                "  Table Properties:      {}",
+                if !tbl_props.is_empty() {
+                    format!(
+                        "TableProperties {}",
+                        tbl_props
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, v))
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    )
+                } else {
+                    "None".to_string()
+                }
             )?;
             writeln!(
                 f,
@@ -902,6 +920,7 @@ impl HealthMetrics {
             table_constraints: None,
             file_compaction: None,
             delta_table_specific_metrics: None,
+            iceberg_table_specific_metrics: None,
         }
     }
 

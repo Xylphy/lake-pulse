@@ -9,6 +9,7 @@ use object_store::{
     ClientOptions, ObjectStore, RetryConfig, aws::AmazonS3Builder, azure::MicrosoftAzureBuilder,
     gcp::GoogleCloudStorageBuilder, local::LocalFileSystem,
 };
+use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
@@ -52,23 +53,20 @@ impl GenericStorageProvider {
         })?;
         let base_path = PathBuf::from(path);
 
-        if !base_path.exists() {
-            return Err(StorageError::ConfigError(format!(
-                "Base path does not exist: {}",
-                path
-            )));
-        }
+        // Canonicalize the path (handles both relative and absolute paths, resolves symlinks)
+        let canonical_path = base_path.canonicalize().map_err(|e| {
+            StorageError::ConfigError(format!(
+                "Failed to resolve path '{}': {} (path must exist)",
+                path, e
+            ))
+        })?;
 
-        if !base_path.is_dir() {
+        if !canonical_path.is_dir() {
             return Err(StorageError::ConfigError(format!(
                 "Base path is not a directory: {}",
-                path
+                canonical_path.display()
             )));
         }
-
-        let canonical_path = base_path.canonicalize().map_err(|e| {
-            StorageError::ConfigError(format!("Failed to canonicalize path: {}", e))
-        })?;
 
         let store = LocalFileSystem::new_with_prefix(&canonical_path).map_err(|e| {
             StorageError::ConfigError(format!("Failed to create local store: {}", e))
@@ -462,7 +460,8 @@ impl StorageProvider for GenericStorageProvider {
     async fn validate_connection(&self, path: &str) -> StorageResult<()> {
         // For local filesystem, check if the base path is accessible
         if self.config.storage_type == StorageType::Local {
-            let path_url = PathBuf::from(path);
+            let mut path_url = PathBuf::from(&self.base_path);
+            path_url.push(path);
             return if path_url.exists() && path_url.is_dir() {
                 Ok(())
             } else {
@@ -693,12 +692,23 @@ impl StorageProvider for GenericStorageProvider {
             .collect::<HashMap<_, _>>()
     }
 
-    fn url_from_path(&self, path: &str) -> String {
-        if path.contains(&self.base_path) {
+    fn uri_from_path(&self, path: &str) -> String {
+        fn fix_uri(storage_type: &StorageType, path: &str) -> String {
+            if storage_type == &StorageType::Local {
+                let re = Regex::new(r"^file:/+").unwrap();
+                format!("file://{}", re.replace(path, ""))
+            } else {
+                path.to_string()
+            }
+        }
+
+        let fp = if path.contains(&self.base_path) {
             path.to_string()
         } else {
             format!("{}/{}", self.base_path, path.trim_start_matches('/'))
-        }
+        };
+
+        fix_uri(&self.config.storage_type, fp.as_str())
     }
 }
 

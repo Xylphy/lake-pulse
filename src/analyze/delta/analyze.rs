@@ -138,12 +138,10 @@ impl DeltaAnalyzer {
                         let mut file_refs = Vec::new();
                         for entry in json {
                             if let Some(add_actions) = entry.get("add") {
-                                if let Some(add_array) = add_actions.as_array() {
-                                    for add_action in add_array {
-                                        if let Some(path) = add_action.get("path") {
-                                            if let Some(path_str) = path.as_str() {
-                                                file_refs.push(path_str.to_string());
-                                            }
+                                if let Some(obj) = add_actions.as_object() {
+                                    if let Some(path) = obj.get("path") {
+                                        if let Some(path_str) = path.as_str() {
+                                            file_refs.push(path_str.to_string());
                                         }
                                     }
                                 }
@@ -201,6 +199,7 @@ impl DeltaAnalyzer {
         for entry in json {
             // Extract clustering columns from clusterBy
             if let Some(cluster_by) = entry.get("clusterBy") {
+                // TODO: Double check if `.as_array()` is correct. Maybe it should be `.as_object()`?
                 if let Some(cluster_array) = cluster_by.as_array() {
                     let clustering_columns: Vec<String> = cluster_array
                         .iter()
@@ -219,6 +218,7 @@ impl DeltaAnalyzer {
             // Extract clustering from metaData
             if let Some(metadata) = entry.get("metaData") {
                 if let Some(cluster_by) = metadata.get("clusterBy") {
+                    // TODO: Double check if `.as_array()` is correct. Maybe it should be `.as_object()`?
                     if let Some(cluster_array) = cluster_by.as_array() {
                         if result.clustering_columns.is_empty() {
                             result.clustering_columns = cluster_array
@@ -262,6 +262,7 @@ impl DeltaAnalyzer {
                         result.schema_changes.push(SchemaChange {
                             version: current_version,
                             timestamp: entry.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0),
+                            // TODO: Is this correct?
                             schema: Value::Null,
                             is_breaking: true,
                         });
@@ -277,26 +278,24 @@ impl DeltaAnalyzer {
     /// Extract deletion vector metrics from a Delta log entry
     fn extract_deletion_vectors(&self, entry: &Value, result: &mut MetadataProcessingResult) {
         if let Some(remove_actions) = entry.get("remove") {
-            if let Some(remove_array) = remove_actions.as_array() {
-                for remove_action in remove_array {
-                    if let Some(deletion_vector) = remove_action.get("deletionVector") {
-                        result.deletion_vector_count += 1;
+            if let Some(remove_array) = remove_actions.as_object() {
+                if let Some(deletion_vector) = remove_array.get("deletionVector") {
+                    result.deletion_vector_count += 1;
 
-                        if let Some(size) = deletion_vector.get("sizeInBytes") {
-                            result.deletion_vector_total_size += size.as_u64().unwrap_or(0);
-                        }
+                    if let Some(size) = deletion_vector.get("sizeInBytes") {
+                        result.deletion_vector_total_size += size.as_u64().unwrap_or(0);
+                    }
 
-                        if let Some(rows) = deletion_vector.get("cardinality") {
-                            result.deleted_rows += rows.as_u64().unwrap_or(0);
-                        }
-
-                        if let Some(timestamp) = remove_action.get("timestamp") {
-                            let creation_time = timestamp.as_u64().unwrap_or(0) as i64;
-                            let age_days = (chrono::Utc::now().timestamp() - creation_time / 1000)
-                                as f64
-                                / 86400.0;
-                            result.oldest_dv_age = result.oldest_dv_age.max(age_days);
-                        }
+                    if let Some(rows) = deletion_vector.get("cardinality") {
+                        result.deleted_rows += rows.as_u64().unwrap_or(0);
+                    }
+                    // TODO: Check if it's `timestamp` or `deletionTimestamp`
+                    if let Some(timestamp) = remove_array.get("timestamp") {
+                        let creation_time = timestamp.as_u64().unwrap_or(0) as i64;
+                        let age_days = (chrono::Utc::now().timestamp() - creation_time / 1000)
+                            as f64
+                            / 86400.0;
+                        result.oldest_dv_age = result.oldest_dv_age.max(age_days);
                     }
                 }
             }
@@ -330,6 +329,7 @@ impl DeltaAnalyzer {
                 if let Ok(schema) =
                     serde_json::from_str::<Value>(schema_string.as_str().unwrap_or(""))
                 {
+                    // TODO: Should it be beautified?
                     let constraints = self.extract_constraints_from_schema(&schema);
                     result.total_constraints += constraints.0;
                     result.check_constraints += constraints.1;
@@ -824,6 +824,7 @@ impl DeltaAnalyzer {
 
         // Estimate size based on actions in the transaction log
         if let Some(add_actions) = json.get("add") {
+            // TODO: Double check if `.as_array()` is correct. Maybe it should be `.as_object()`?
             if let Some(add_array) = add_actions.as_array() {
                 for add_action in add_array {
                     if let Some(file_size) = add_action.get("sizeInBytes") {
@@ -936,6 +937,7 @@ impl DeltaAnalyzer {
         let mut foreign_key = 0;
 
         if let Some(fields) = schema.get("fields") {
+            // TODO: Double check if `.as_array()` is correct. Maybe it should be `.as_object()`?
             if let Some(fields_array) = fields.as_array() {
                 for field in fields_array {
                     total += 1;

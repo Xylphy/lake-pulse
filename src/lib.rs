@@ -1,5 +1,5 @@
 pub mod analyze;
-pub mod delta;
+pub mod reader;
 pub mod storage;
 pub mod util;
 

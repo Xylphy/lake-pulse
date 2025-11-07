@@ -19,21 +19,25 @@ pub fn is_ndjson(content: &str) -> bool {
 }
 
 pub fn detect_table_type(objects: &Vec<FileMetadata>) -> String {
+    // Check for Delta Lake: look for _delta_log directory
     if objects
         .into_iter()
         .find(|f| f.path.contains("_delta_log"))
         .is_some()
     {
-        "delta".to_string()
-    } else if objects
+        return "delta".to_string();
+    }
+
+    // Check for Iceberg: look for metadata directory with .metadata.json files
+    if objects
         .into_iter()
-        .find(|f| f.path.contains("metadata"))
+        .find(|f| f.path.contains("/metadata/") && f.path.ends_with(".metadata.json"))
         .is_some()
     {
-        "iceberg".to_string()
-    } else {
-        "unknown".to_string()
+        return "iceberg".to_string();
     }
+
+    "unknown".to_string()
 }
 
 /// Wrapper function to measure duration of an async operation

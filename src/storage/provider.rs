@@ -104,7 +104,7 @@ pub trait StorageProvider: Send + Sync {
     ///
     /// # Arguments
     /// * `path` - The path
-    fn url_from_path(&self, path: &str) -> String;
+    fn uri_from_path(&self, path: &str) -> String;
 }
 
 impl Debug for dyn StorageProvider {

@@ -1,9 +1,11 @@
 use crate::analyze::delta::DeltaAnalyzer;
+use crate::analyze::iceberg::IcebergAnalyzer;
 use crate::analyze::metrics::{
     FileCompactionMetrics, FileInfo, HealthMetrics, HealthReport, PartitionInfo, TimedLikeMetrics,
 };
 use crate::analyze::table_analyzer::TableAnalyzer;
-use crate::delta::reader::DeltaReader;
+use crate::reader::delta::reader::DeltaReader;
+use crate::reader::iceberg::reader::IcebergReader;
 use crate::storage::{FileMetadata, StorageConfig, StorageProvider, StorageProviderFactory};
 use crate::util::util::{
     detect_table_type, measure_dur, measure_dur_async, measure_dur_with_error,
@@ -58,7 +60,7 @@ impl AnalyzerBuilder {
     /// # Examples
     ///
     /// ```no_run
-    /// use lake_health::analyze::AnalyzerBuilder;
+    /// use lake_health::analyze::analyze::AnalyzerBuilder;
     /// use lake_health::storage::StorageConfig;
     ///
     /// let config = StorageConfig::local().with_option("path", "/data");
@@ -78,7 +80,7 @@ impl AnalyzerBuilder {
     /// * `parallelism` - The desired level of parallelism (number of concurrent tasks)
     ///
     /// ```no_run
-    /// use lake_health::analyze::AnalyzerBuilder;
+    /// use lake_health::analyze::analyze::AnalyzerBuilder;
     /// use lake_health::storage::StorageConfig;
     ///
     /// let config = StorageConfig::local().with_option("path", "/data");
@@ -174,7 +176,7 @@ impl Analyzer {
             "validate_connection_dur",
             &mut internal_metrics,
             || async { self.storage_provider.validate_connection(location).await },
-            None,
+            Some(|_| "Successfully validated connection".to_string()),
         )
         .await?;
 
@@ -218,9 +220,14 @@ impl Analyzer {
                 Arc::clone(&self.storage_provider),
                 self.parallelism,
             )),
-            "iceberg" => {
-                return Err(format!("Iceberg table format not yet supported").into());
-            }
+            "iceberg" => Arc::new(IcebergAnalyzer::new(
+                Arc::clone(&self.storage_provider),
+                self.parallelism,
+            )),
+            "lance" => Arc::new(LanceAnalyzer::new(
+                Arc::clone(&self.storage_provider),
+                self.parallelism,
+            )),
             _ => {
                 return Err(format!("Unknown or unsupported table type={}", table_type).into());
             }
@@ -402,7 +409,7 @@ impl Analyzer {
         )
         .await;
 
-        let table_path = self.storage_provider.url_from_path(location);
+        let table_path = self.storage_provider.uri_from_path(location);
 
         let analyze_after_validation_dur = list_files_start.elapsed()?;
         internal_metrics.push_back((
@@ -413,13 +420,14 @@ impl Analyzer {
 
         info!("Analysis took={}", analyze_after_validation_dur.as_millis());
 
-        measure_dur_async(
-            "delta_reader",
-            &mut internal_metrics,
-            || async {
-                if table_type == "delta" {
+        // Only try to open Delta reader for Delta tables
+        if table_type == "delta" {
+            measure_dur_async(
+                "delta_reader",
+                &mut internal_metrics,
+                || async {
                     let delta_reader = DeltaReader::open(
-                        self.storage_provider.url_from_path(location).as_str(),
+                        self.storage_provider.uri_from_path(location).as_str(),
                         &self.storage_provider.clean_options(),
                     )
                     .await;
@@ -430,21 +438,42 @@ impl Analyzer {
                                 Some(reader.extract_metrics().await?);
                             Ok(())
                         }
-                        Err(e) => Err(e),
+                        Err(e) => {
+                            warn!("Failed to open Delta reader: {}", e);
+                            Err(e)
+                        }
                     }
-                } else {
-                    let err_msg = format!(
-                        "Failed to open Delta reader for location={}. \
-                    Continuing without Delta-specific metrics.",
-                        location
-                    );
-                    warn!(err_msg);
-                    Err(err_msg.into())
-                }
-            },
-            Some(|_| "Opened Delta reader".to_string()),
-        )
-        .await?;
+                },
+                Some(|_| "Opened Delta reader".to_string()),
+            )
+            .await?;
+        } else if table_type == "iceberg" {
+            measure_dur_async(
+                "iceberg_reader",
+                &mut internal_metrics,
+                || async {
+                    let iceberg_reader = IcebergReader::open(
+                        self.storage_provider.uri_from_path(location).as_str(),
+                        &self.storage_provider.clean_options(),
+                    )
+                    .await;
+
+                    match iceberg_reader {
+                        Ok(reader) => {
+                            metrics.iceberg_table_specific_metrics =
+                                Some(reader.extract_metrics().await?);
+                            Ok(())
+                        }
+                        Err(e) => {
+                            warn!("Failed to open Iceberg reader: {}", e);
+                            Err(e)
+                        }
+                    }
+                },
+                Some(|_| "Opened Iceberg reader".to_string()),
+            )
+            .await?;
+        }
 
         let timed_metrics: LinkedList<(String, u128, u128)> = internal_metrics
             .iter()

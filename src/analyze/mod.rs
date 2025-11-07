@@ -1,5 +1,6 @@
 pub mod analyze;
 pub mod delta;
+pub mod iceberg;
 pub mod metrics;
 pub mod table_analyzer;
 

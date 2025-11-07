@@ -15,6 +15,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 deltalake = { version = "0.29", features = ["deltalake-aws", "deltalake-azure"] }
 deltalake-azure = "0.12"
 deltalake-aws = "0.12"
+iceberg = { version = "0.7.0", features = ["storage-all"] }
 
 object_store = { version = "0.12", features = ["aws", "azure", "gcp"] }
 url = "2.5"
@@ -24,6 +25,8 @@ futures = { version = "0.3", features = ["std"] }
 bytes = "1.0"
 chrono = "0.4"
 log = "0.4.28"
+regex = "1.12.2"
+
 
 
 
